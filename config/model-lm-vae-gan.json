@@ -1,0 +1,69 @@
+{
+  "Setup": {
+    "name": "Model_LM_VAE_GAN",
+    "suffix": "CV1",
+    "batch_train": 32,
+    "batch_test": 32,
+    "workers_train": 10,
+    "workers_test": 10,
+    "epochs": 20,
+    "log_interval": 50,
+    "saved_models_path": "./assets"
+  },
+  "Model": {
+    "class": "model_lm_vae.model_v3.Model",
+    "args": {
+    }
+  },
+  "Gen-Optimizer": {
+    "class": "torch.optim.Adam",
+    "args": {
+      "lr": 1.0e-4
+    }
+  },
+  "Dis-Optimizer": {
+    "class": "torch.optim.Adam",
+    "args": {
+      "lr": 1.0e-4
+    }
+  },
+  "Scheduler": {
+    "class": "torch.optim.lr_scheduler.ExponentialLR",
+    "args": {
+      "gamma": 0.96
+    }
+  },
+  "Dataset": {
+    "class": "model_lm_vae.dataset_v3.Dataset",
+    "args": {
+      "visual_dataroot": "{p}/images",
+      "visual_feature_dataroot": "{p}/image_features",
+      "lm_dataroot": "{p}/face_meshes",
+      "audio_dataroot": "{p}/audios",
+      "fps": 25,
+      "sample_rate": 16000,
+      "n_mels": 80,
+      "n_fft": 800,
+      "win_length": 800,
+      "hop_length": 635,
+      "n_frames": 5,
+      "img_size": 256,
+      "training": {"key": "train", "yes": true, "no": false}
+    }
+  },
+  "Transforms": [
+    {
+      "class": "utils.transforms.ToTensor1D",
+      "args": {}
+    }
+  ],
+  "Metrics": [
+    {
+      "label": "Custom",
+      "class": "model_lm_vae.loss.CustomMetric",
+      "args": {"output_transform": ["y_pred", "y"]},
+      "use_for": ["val","test"],
+      "save_checkpoint": false
+  }
+  ]
+}

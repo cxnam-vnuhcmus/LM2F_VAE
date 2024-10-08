@@ -1,0 +1,6 @@
+Eval. results - Epoch: 1; Custom: 0.052933666842187733
+Eval. results - Epoch: 2; Custom: 0.020566277383953557
+Eval. results - Epoch: 3; Custom: 0.01586979502051411
+Eval. results - Epoch: 4; Custom: 0.006152326488786211
+Eval. results - Epoch: 5; Custom: 0.004034199425279714
+Eval results - model_lm_vae.model_v3.Model; ./assets/datas_norm/M003.txt; Custom: 0.0040

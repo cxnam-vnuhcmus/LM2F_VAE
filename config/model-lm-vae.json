@@ -1,0 +1,98 @@
+{
+  "Setup": {
+    "name": "Model_LM_VAE",
+    "suffix": "CV1",
+    "batch_train": 32,
+    "batch_test": 32,
+    "workers_train": 10,
+    "workers_test": 10,
+    "epochs": 20,
+    "log_interval": 50,
+    "saved_models_path": "./assets"
+  },
+  "Model": {
+    "class": "model_lm_vae.model.Model",
+    "args": {
+    }
+  },
+  "Optimizer": {
+    "class": "torch.optim.Adam",
+    "args": {
+      "lr": 1.0e-4
+    }
+  },
+  "Scheduler": {
+    "class": "torch.optim.lr_scheduler.ExponentialLR",
+    "args": {
+      "gamma": 0.96
+    }
+  },
+  "Dataset": {
+    "class": "model_lm_vae.dataset.Dataset",
+    "args": {
+      "visual_dataroot": "{p}/images",
+      "visual_feature_dataroot": "{p}/image_features",
+      "lm_dataroot": "{p}/face_meshes",
+      "audio_dataroot": "{p}/audios",
+      "fps": 25,
+      "sample_rate": 16000,
+      "n_mels": 80,
+      "n_fft": 800,
+      "win_length": 800,
+      "hop_length": 635,
+      "n_frames": 5,
+      "img_size": 256,
+      "training": {"key": "train", "yes": true, "no": false}
+    }
+  },
+  "Transforms": [
+    {
+      "class": "utils.transforms.ToTensor1D",
+      "args": {}
+    },
+    {
+      "class": "utils.transforms.RandomFlip",
+      "args": {"p": 0.5},
+      "test": false
+    },
+    {
+      "class": "utils.transforms.RandomScale",
+      "args": {"max_scale": 1.50},
+      "test": false
+    },
+    {
+      "class": "utils.transforms.RandomPadding",
+      "args": {"out_len": 220500},
+      "test": false
+    },
+    {
+      "class": "utils.transforms.RandomCrop",
+      "args": {"out_len": 220500},
+      "test": false
+    },
+    {
+      "class": "utils.transforms.RandomNoise",
+      "args": {"snr_min_db": 10.0, "snr_max_db": 120.0, "p": 0.25},
+      "test": false
+    },
+    {
+      "class": "utils.transforms.RandomPadding",
+      "args": {"out_len": 220500, "train": false},
+      "train": false
+    },
+    {
+      "class": "utils.transforms.RandomCrop",
+      "args": {"out_len": 220500, "train": false},
+      "train": false
+    }
+  ],
+  "Metrics": [
+    {
+      "label": "Custom",
+      "class": "model_lm_vae.loss.CustomMetric",
+      "args": {"output_transform": ["y_pred", "y"]},
+      "use_for": ["val","test"],
+      "save_checkpoint": false
+  }
+  ]
+}
