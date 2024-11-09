@@ -2,7 +2,7 @@ import os as _os
 import sys as _sys
 
 from ignite_trainer.version import __version__
-from ._trainer_gan import main, run
+from ._trainer import main, run
 from ._utils import load_class
 from ._interfaces import AbstractNet, AbstractTransform
 

@@ -151,23 +151,23 @@ def run(experiment_name: str,
 
         params_total_label = ''
         params_train_label = ''
-        if num_params_total > 1e6:
-            num_params_total /= 1e6
-            params_total_label = 'M'
-        elif num_params_total > 1e3:
-            num_params_total /= 1e3
-            params_total_label = 'k'
+        # if num_params_total > 1e6:
+        #     num_params_total /= 1e6
+        #     params_total_label = 'M'
+        # elif num_params_total > 1e3:
+        #     num_params_total /= 1e3
+        #     params_total_label = 'k'
 
-        if num_params_train > 1e6:
-            num_params_train /= 1e6
-            params_train_label = 'M'
-        elif num_params_train > 1e3:
-            num_params_train /= 1e3
-            params_train_label = 'k'
+        # if num_params_train > 1e6:
+        #     num_params_train /= 1e6
+        #     params_train_label = 'M'
+        # elif num_params_train > 1e3:
+        #     num_params_train /= 1e3
+        #     params_train_label = 'k'
 
         tqdm.tqdm.write(f'\n{Network.__name__}\n')
-        tqdm.tqdm.write('Total number of parameters: {:.2f}{}'.format(num_params_total, params_total_label))
-        tqdm.tqdm.write('Number of trainable parameters: {:.2f}{}'.format(num_params_train, params_train_label))
+        tqdm.tqdm.write('Total number of parameters: {}{}'.format(num_params_total, params_total_label))
+        tqdm.tqdm.write('Number of trainable parameters: {}{}'.format(num_params_train, params_train_label))
 
         def training_step(engine: ieng.Engine, batch) -> torch.Tensor:
             model.train()
@@ -244,6 +244,11 @@ def run(experiment_name: str,
                 'optimizer': optimizer,
                 'trainer': trainer
             }, checkpoint=checkpoint)
+            # model.load_state_dict(checkpoint['model'], strict=False)
+            # if 'optimizer' in checkpoint:
+            #     optimizer.load_state_dict(checkpoint['optimizer'])
+            # if 'trainer' in checkpoint:
+            #     trainer.load_state_dict(checkpoint['trainer'])
             print(f"Load checkpoint: {model_args['pretrained']}")
         
         # Events
@@ -447,28 +452,28 @@ def run_evaluation(experiment_name: str,
 
         params_total_label = ''
         params_train_label = ''
-        if num_params_total > 1e6:
-            num_params_total /= 1e6
-            params_total_label = 'M'
-        elif num_params_total > 1e3:
-            num_params_total /= 1e3
-            params_total_label = 'k'
+        # if num_params_total > 1e6:
+        #     num_params_total /= 1e6
+        #     params_total_label = 'M'
+        # elif num_params_total > 1e3:
+        #     num_params_total /= 1e3
+        #     params_total_label = 'k'
 
-        if num_params_train > 1e6:
-            num_params_train /= 1e6
-            params_train_label = 'M'
-        elif num_params_train > 1e3:
-            num_params_train /= 1e3
-            params_train_label = 'k'
+        # if num_params_train > 1e6:
+        #     num_params_train /= 1e6
+        #     params_train_label = 'M'
+        # elif num_params_train > 1e3:
+        #     num_params_train /= 1e3
+        #     params_train_label = 'k'
 
         tqdm.tqdm.write(f'\n{Network.__name__}\n')
-        tqdm.tqdm.write('Total number of parameters: {:.2f}{}'.format(num_params_total, params_total_label))
-        tqdm.tqdm.write('Number of trainable parameters: {:.2f}{}'.format(num_params_train, params_train_label))
+        tqdm.tqdm.write('Total number of parameters: {}{}'.format(num_params_total, params_total_label))
+        tqdm.tqdm.write('Number of trainable parameters: {}{}'.format(num_params_train, params_train_label))
 
         def eval_step(engine: ieng.Engine, batch) -> _interfaces.TensorPair:
             model.eval()
                         
-            if log_samples is not None and ((engine.state.iteration - 1) % len(train_loader)) == 0:
+            if log_samples is not None and ((engine.state.iteration - 1) % len(eval_loader)) == 0:
                 os.makedirs(log_samples, exist_ok=True)
                 Network.inference(model, batch, device, log_samples)
                 

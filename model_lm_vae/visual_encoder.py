@@ -13,28 +13,40 @@ class VisualEncoder(nn.Module):
         ])   
 
         self.inv_normalize = T.Compose([
-            T.Normalize(mean=[-1.0, -1.0, -1.0], std=[1.0/0.5, 1.0/0.5, 1.0/0.5]),
-            T.ToPILImage()
+            T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ]) 
         
         self.vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-ema")
+        for param in self.vae.parameters():
+            param.requires_grad = False
 
     def encode(self, x):
         trans_image = self.transform(x)
         trans_image = trans_image.unsqueeze(0)
         trans_image = trans_image.to(self.vae.device)
         with torch.no_grad():
-            latents = vae.encode(trans_image).latent_dist.sample()
+            latents = self.vae.encode(trans_image).latent_dist.sample()
         return latents
     
     def decode(self, latents):
+        self.vae.eval()
         with torch.no_grad():
             samples = self.vae.decode(latents)
-        reconstructed = samples.sample[0]
-        reconstructed = self.inv_normalize(reconstructed)
-        return reconstructed
+            reconstructed = []
+            for tensor in samples.sample:
+                min_value = tensor.min()
+                max_value = tensor.max()
+                tensor = (tensor - min_value)/(max_value - min_value)
+                reconstructed.append(tensor)
+            # reconstructed = [self.inv_normalize(tensor) for tensor in samples.sample]
+            reconstructed = torch.stack(reconstructed)
+        return reconstructed # (32, 3, 256, 256)
     
     def forward(self, x):
         latents = self.encode(x)    
         reconstructed = self.decode(latents)
         return reconstructed
+    
+    def unfreeze_decoder(self):
+        for param in self.vae.decoder.parameters():
+            param.requires_grad = True

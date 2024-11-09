@@ -11,14 +11,14 @@
     "saved_models_path": "./assets"
   },
   "Model": {
-    "class": "model_lm_vae.model.Model",
+    "class": "model_lm_vae.model_v5.Model",
     "args": {
     }
   },
   "Optimizer": {
     "class": "torch.optim.Adam",
     "args": {
-      "lr": 1.0e-4
+      "lr": 1.0e-3
     }
   },
   "Scheduler": {
@@ -28,11 +28,13 @@
     }
   },
   "Dataset": {
-    "class": "model_lm_vae.dataset.Dataset",
+    "class": "model_lm_vae.dataset_v5.Dataset",
     "args": {
       "visual_dataroot": "{p}/images",
       "visual_feature_dataroot": "{p}/image_features",
-      "lm_dataroot": "{p}/face_meshes",
+      "visual_mask_feature_dataroot": "{p}/image_mask_features",
+      "lm_dataroot": "{p}/sketch_features",
+      "audio_feature_dataroot": "{p}/audio_features_2",
       "audio_dataroot": "{p}/audios",
       "fps": 25,
       "sample_rate": 16000,
@@ -89,7 +91,7 @@
   "Metrics": [
     {
       "label": "Custom",
-      "class": "model_lm_vae.loss.CustomMetric",
+      "class": "model_lm_vae.custom_metric.CustomMetric",
       "args": {"output_transform": ["y_pred", "y"]},
       "use_for": ["val","test"],
       "save_checkpoint": false

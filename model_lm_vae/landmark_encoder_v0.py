@@ -87,6 +87,7 @@ class UNet(nn.Module):
         d1 = self.decoder1(d1)
         
         out = self.out_conv(d1)
+        out = torch.sigmoid(out)
         
         return out
     
@@ -95,6 +96,18 @@ class LandmarkToImageFeatureEncoder(nn.Module):
         super(LandmarkToImageFeatureEncoder, self).__init__()
         self.feature_extraction = LandmarkNet()
         self.unet = UNet()
+        self.fc_mu = nn.Linear(4 * 32 * 32, 512)
+        self.fc_logvar = nn.Linear(4 * 32 * 32, 512)
+        self.decoder_fc = nn.Sequential(
+            nn.Linear(512, 4 * 32 * 32),
+            # nn.Sigmoid()
+        )
+        
+    def reparameterize(self, mu, logvar):
+        # Reparameterization trick to sample from the latent space
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def forward(self, landmark_sketch, img_feature, raw_img=None):
         # Extract features
@@ -103,7 +116,16 @@ class LandmarkToImageFeatureEncoder(nn.Module):
         # Concatenate features with img_feature
         concatenated = torch.cat([img_feature, features], dim=1)
         
-        # Inpaint with U-Net
-        output = self.unet(concatenated)
+        concatenated = self.unet(concatenated)
+        
+        concatenated_flat = concatenated.view(concatenated.size(0), -1)
+        
+        mu = self.fc_mu(concatenated_flat)
+        logvar = self.fc_logvar(concatenated_flat)
+        
+        z = self.reparameterize(mu, logvar)
+        output = self.decoder_fc(z)
+        output = output.reshape(output.shape[0], 4, 32, 32)
+        
         
         return output

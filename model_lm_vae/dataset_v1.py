@@ -110,7 +110,7 @@ class Dataset(td.Dataset):
             vs_folder = os.path.join(visual_p, line)
             
             lm_paths = sorted(os.listdir(lm_folder))
-            for i in range(len(lm_paths)):
+            for i in range(0, len(lm_paths), 5):
                 lm_path = os.path.join(lm_folder,lm_paths[i])
                 vs_feat_path = os.path.join(vs_feat_folder,lm_paths[i])
                 vs_path = os.path.join(vs_folder,lm_paths[i].replace("json","jpg"))
@@ -149,7 +149,7 @@ class Dataset(td.Dataset):
                 connection_drawing_spec=mp_drawing.DrawingSpec(thickness=2, circle_radius=1,color=(255,255,255)))
             
             image_lm = torch.from_numpy(image_lm).float() / 255.0
-            image_lm = image_lm.permute(2,0,1).unsqueeze(0) #(1,3,256,256)
+            image_lm = image_lm.permute(2,0,1)[0].unsqueeze(0).unsqueeze(0) #(1,1,256,256)
                                         
             # image_lm = F.interpolate(image_lm, size=(32, 32), mode='bilinear', align_corners=False)
             
@@ -158,13 +158,13 @@ class Dataset(td.Dataset):
             # to_pil = transforms.ToPILImage()
             # image_save = image_lm.squeeze(0).byte() * 255#.squeeze(0)[0]
             # image_save = to_pil(image_save)
-            # image_save.save(f'test.jpg')   
+            # image_save.save(f'test.png')   
                     
         #img_feature
         with open(vs_feat_path, "r") as f:
             img_feature = json.load(f)
         gt_img_feature = torch.FloatTensor(img_feature) #(1,4,32,32)
-        
+
         #image
         gt_img = Image.open(vs_path)
         gt_img = self.img_transform(gt_img)

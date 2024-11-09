@@ -1,28 +1,28 @@
 #Train
 python main.py \
-  --config config/model-lm-vae-gan.json \
+  --config config/model-lm-vae.json \
   --data_root /home/cxnam/Documents/MEAD \
   --data_file ./assets/datas_norm/M003.txt \
-  --suffix M003_lm_vae_v3 \
-  --model model_lm_vae.model_v3.Model \
-  --dataset model_lm_vae.dataset_v1.Dataset \
+  --suffix M003_lm_vae_v43 \
+  --model model_lm_vae.model_v4_3.Model \
+  --dataset model_lm_vae.dataset_v7.Dataset \
+  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v43 \
   --skip-train-val \
-  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v3 \
-  --epochs 100 \
-  --pretrained ./assets/checkpoints/best_M003_lm_vae_v1_checkpoint_1_MSE=-0.1148.pt \
+  --epochs 300 \
+  --pretrained /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/checkpoints/checkpoint_M003_lm_vae_v4_checkpoint_50.pt \
   --n_folders 5 \
   
 
 #Eval
 python main.py \
-  --config config/model-lm-vae-gan.json \
+  --config config/model-lm-vae.json \
   --data_root /home/cxnam/Documents/MEAD \
   --data_file ./assets/datas_norm/M003.txt \
-  --suffix M003_lm_vae_v3 \
-  --model model_lm_vae.model_v3.Model \
-  --dataset model_lm_vae.dataset_v1.Dataset \
+  --suffix M003_lm_vae_v5 \
+  --model model_lm_vae.model_v5.Model \
+  --dataset model_lm_vae.dataset_v5.Dataset \
+  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v5 \
   --skip-train-val \
-  --pretrained /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/checkpoints/best_M003_lm_vae_v3_checkpoint_1_MSE=-0.0040.pt \
+  --pretrained /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/checkpoints/best_M003_lm_vae_v5_checkpoint_1_MSE=-0.0024.pt \
   --evaluation \
-  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v3 \
   --n_folders 10

@@ -27,6 +27,7 @@ class Dataset(td.Dataset):
                  audio_dataroot: str,
                  visual_dataroot: str,
                  visual_feature_dataroot: str, 
+                 visual_mask_feature_dataroot: str,
                  lm_dataroot: str,
                  fps: int,
                  img_size: int,
@@ -45,6 +46,7 @@ class Dataset(td.Dataset):
         self.audio_dataroot = os.path.join(self.data_root, audio_dataroot)
         self.visual_dataroot = os.path.join(self.data_root, visual_dataroot)
         self.visual_feature_dataroot = os.path.join(self.data_root, visual_feature_dataroot)
+        self.visual_mask_feature_dataroot = os.path.join(self.data_root, visual_mask_feature_dataroot)
         self.lm_dataroot = os.path.join(self.data_root, lm_dataroot)
         self.img_size = img_size
         self.train = train    
@@ -97,19 +99,22 @@ class Dataset(td.Dataset):
             visual_p = self.visual_dataroot.format(p=p)
             lm_p = self.lm_dataroot.format(p=p)
             visual_feat_p = self.visual_feature_dataroot.format(p=p)
+            visual_mask_feat_p = self.visual_mask_feature_dataroot.format(p=p)
             
             lm_folder = os.path.join(lm_p, line)
             vs_feat_folder = os.path.join(visual_feat_p, line)
+            vs_mask_feat_folder = os.path.join(visual_mask_feat_p, line)
             vs_folder = os.path.join(visual_p, line)
             
             lm_paths = sorted(os.listdir(lm_folder))
             for i in range(len(lm_paths)):
                 lm_path = os.path.join(lm_folder,lm_paths[i])
                 vs_feat_path = os.path.join(vs_feat_folder,lm_paths[i])
+                vs_mask_feat_path = os.path.join(vs_mask_feat_folder,lm_paths[i])
                 vs_path = os.path.join(vs_folder,lm_paths[i].replace("json","jpg"))
                 
-                if os.path.exists(vs_path) and os.path.exists(vs_feat_path):
-                    all_datas.append((lm_path, vs_feat_path, vs_path))
+                if os.path.exists(vs_path) and os.path.exists(vs_feat_path) and os.path.exists(vs_mask_feat_path):
+                    all_datas.append((lm_path, vs_feat_path, vs_mask_feat_path, vs_path))
                 
         return all_datas
         
@@ -123,7 +128,7 @@ class Dataset(td.Dataset):
         # return 1
 
     def __getitem__(self, idx):        
-        (lm_path, vs_feat_path, vs_path) = self.all_datas[idx]
+        (lm_path, vs_feat_path, vs_mask_feat_path, vs_path) = self.all_datas[idx]
 
         #landmark
         with open(lm_path, "r") as f:
@@ -139,35 +144,39 @@ class Dataset(td.Dataset):
                 landmark_list=face_landmarks_proto,
                 connections=ROI,
                 landmark_drawing_spec=None,
-                connection_drawing_spec=mp_drawing.DrawingSpec(thickness=2, circle_radius=1, color=(255,255,255)))
+                connection_drawing_spec=mp_drawing.DrawingSpec(thickness=5, circle_radius=1, color=(255,255,255)))
 
             image_lm = cv2.cvtColor(image_lm, cv2.COLOR_RGB2GRAY)            
             image_lm = torch.from_numpy(image_lm).float() / 255.0
-            image_lm = F.interpolate(image_lm, size=(32, 32), mode='bilinear', align_corners=False)
             image_lm = image_lm.unsqueeze(0).unsqueeze(0) #(1, 1, 256, 256)            
-            
-            from PIL import Image
-            import torchvision.transforms as transforms
-            to_pil = transforms.ToPILImage()
-            image_save = (image_lm[0] * 255).clamp(0, 255).byte()
-            image_save = to_pil(image_save)
-            image_save.save(f'test.jpg')   
-            
-            1/0
+            image_lm = F.interpolate(image_lm, size=(32, 32), mode='bilinear', align_corners=False)
 
+            
+            # from PIL import Image
+            # import torchvision.transforms as transforms
+            # to_pil = transforms.ToPILImage()
+            # image_save = (image_lm[0] * 255).clamp(0, 255).byte()
+            # image_save = to_pil(image_save)
+            # image_save.save(f'test.jpg')   
+            
         #img_feature
         with open(vs_feat_path, "r") as f:
             img_feature = json.load(f)
         gt_img_feature = torch.FloatTensor(img_feature) #(1, 4, 32, 32)
         
+        #img_mask_feature
+        with open(vs_mask_feat_path, "r") as f:
+            img_mask_feature = json.load(f)
+        gt_img_mask_feature = torch.FloatTensor(img_mask_feature) #(1, 4, 32, 32)
+        
         #image
         gt_img = Image.open(vs_path)
         gt_img = self.img_transform(gt_img).unsqueeze(0) #(1, 3, 256, 256)
         
-        return (image_lm, gt_img_feature, gt_img, vs_path)
+        return (image_lm, gt_img_feature, gt_img_mask_feature, gt_img, vs_path)
 
     def collate_fn(self, batch):
-        batch_landmark, batch_gt_img_feature, batch_gt_img, batch_vs_path = zip(*batch)
+        batch_landmark, batch_gt_img_feature, batch_gt_mask_img_feature, batch_gt_img, batch_vs_path = zip(*batch)
         keep_ids = [idx for idx, (_, _) in enumerate(zip(batch_landmark, batch_gt_img_feature))]
             
         if not all(img is None for img in batch_landmark):
@@ -182,6 +191,12 @@ class Dataset(td.Dataset):
         else:
             batch_gt_img_feature = None
             
+        if not all(img is None for img in batch_gt_mask_img_feature):
+            batch_gt_mask_img_feature = [batch_gt_mask_img_feature[idx] for idx in keep_ids]
+            batch_gt_mask_img_feature = torch.cat(batch_gt_mask_img_feature, dim=0)
+        else:
+            batch_gt_mask_img_feature = None
+            
         if not all(img is None for img in batch_gt_img):
             batch_gt_img = [batch_gt_img[idx] for idx in keep_ids]
             batch_gt_img = torch.cat(batch_gt_img, dim=0)
@@ -193,4 +208,4 @@ class Dataset(td.Dataset):
         else:
             batch_vs_path = None
             
-        return batch_landmark, batch_gt_img_feature, batch_gt_img, batch_vs_path
+        return batch_landmark, batch_gt_img_feature, batch_gt_mask_img_feature, batch_gt_img, batch_vs_path

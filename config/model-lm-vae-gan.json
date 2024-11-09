@@ -38,7 +38,8 @@
     "args": {
       "visual_dataroot": "{p}/images",
       "visual_feature_dataroot": "{p}/image_features",
-      "lm_dataroot": "{p}/face_meshes",
+      "visual_mask_feature_dataroot": "{p}/image_mask_features",
+      "lm_dataroot": "{p}/sketch_features",
       "audio_dataroot": "{p}/audios",
       "fps": 25,
       "sample_rate": 16000,

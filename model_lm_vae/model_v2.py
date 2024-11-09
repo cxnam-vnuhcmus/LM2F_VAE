@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 import os
 from typing import Union
 import json
+import torchvision.transforms as transforms
+import seaborn as sns
+from .landmark_encoder_v2 import FusionModel
 
-from .landmark_encoder_v2 import LandmarkNet
-from .loss import CustomLoss
-
+#DS_V4 LM_V2
 class Model(nn.Module):
 
     def __init__(self,
@@ -23,10 +24,8 @@ class Model(nn.Module):
         self.pretrained = pretrained
         self.infer_samples = infer_samples
         
-        self.landmark = LandmarkNet()
+        self.model = FusionModel()
         
-        self.criterion = CustomLoss()
-    
     @property
     def device(self):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -37,32 +36,25 @@ class Model(nn.Module):
                 gt_img_feature,
                 gt_img
                 ):
-        img_mask = gt_img.to(self.device).clone()
-        img_mask[:, :, 2*64:3*64, 1*64:3*64] = 1
+        landmark = landmark.to(self.device)
+        gt_img_feature = gt_img_feature.to(self.device)
+            
+        mask_gt_img_feature = gt_img_feature.clone()        
+        noise = torch.randn(gt_img_feature.shape).to(self.device)
+        mask_gt_img_feature[:, :, 4*4:7*4, 2*4:6*4] += noise[:, :, 4*4:7*4, 2*4:6*4]
         
-        # from PIL import Image
-        # import torchvision.transforms as transforms
-        # to_pil = transforms.ToPILImage()
-        # image_save = (img_mask[0] * 255).clamp(0, 255).byte()
-        # image_save = to_pil(image_save)
-        # image_save.save(f'test.jpg')   
+        ref_img_feature = gt_img_feature.clone()
+        ref_img_feature = ref_img_feature[torch.randperm(ref_img_feature.size(0))]
         
-        combined_image = torch.cat((img_mask, landmark), dim=1)
-
-        img_features =  self.landmark(combined_image)       #(B,4,32,32)
+        pred_img_feature =  self.model(mask_gt_img_feature, landmark, ref_img_feature)        
         
-        loss = self.loss_fn(img_features, gt_img_feature)
-                
-        return (img_features), loss
+        loss = self.model.loss_function(pred_img_feature, gt_img_feature)
         
-    def loss_fn(self, pred_features, gt_features):
-        loss = self.criterion(pred_features, gt_features)
-
-        return loss
-
+        return (pred_img_feature, None), loss
+        
         
     def training_step_imp(self, batch, device) -> torch.Tensor:
-        landmark, gt_img_feature, gt_img, _ = batch
+        landmark, gt_img_feature, gt_mask_img_feature, gt_img, _ = batch
         _, loss = self(
             landmark = landmark,
             gt_img_feature = gt_img_feature,
@@ -73,67 +65,84 @@ class Model(nn.Module):
 
     def eval_step_imp(self, batch, device):
         with torch.no_grad():
-            landmark, gt_img_feature, gt_img, _ = batch
-            gt_img_feature = gt_img_feature.to(device)
+            landmark, gt_img_feature, gt_mask_img_feature, gt_img, _ = batch
             
-            (img_feature), _ = self(
+            gt_img_feature_org = gt_img_feature.clone()
+
+            (img_feature, _), _ = self(
                 landmark = landmark,
                 gt_img_feature = gt_img_feature,
                 gt_img = gt_img
             )
-                
+                            
         return {"y_pred": img_feature, "y": gt_img_feature}
         
     def inference(self, batch, device, save_folder):
         with torch.no_grad():
-            landmark, gt_img_feature, gt_img, gt_img_path = batch
+            landmark, gt_img_feature, gt_mask_img_feature, gt_img, gt_img_path = batch
             
-            (img_feature), _ = self(
-                landmark = landmark,
-                gt_img_feature = gt_img_feature,
-                gt_img = gt_img
+            # Forward pass with attention weights output
+            (pred_img_feature, attn_weights), _ = self(
+                landmark=landmark,
+                gt_img_feature=gt_img_feature,
+                gt_img=gt_img
             )
             
+            os.makedirs(os.path.join(save_folder, "landmarks"), exist_ok=True)
+
             gt_img_feature_list = gt_img_feature.tolist()
-            img_feature_list = img_feature.tolist()
+            pred_img_feature_list = pred_img_feature.tolist()            
             data = {
                 "gt_img_feature": gt_img_feature_list,
-                "pred_img_feature": img_feature_list,
+                "pred_img_feature": pred_img_feature_list,
                 "gt_img_path": gt_img_path
             }
-            
-            os.makedirs(os.path.join(save_folder, "landmarks"), exist_ok=True)
-            
-            with open(os.path.join(save_folder,'tensor_data.json'), 'w') as json_file:
+            with open(os.path.join(save_folder, 'tensor_data.json'), 'w') as json_file:
                 json.dump(data, json_file)
             
-            gt_img_feature = gt_img_feature.permute(0, 2, 3, 1)
-            img_feature = img_feature.permute(0, 2, 3, 1).detach().cpu()
-            
-            for i in range(landmark.shape[0]):
-                image_size = 32
+            gt_img_feature = gt_img_feature.permute(0, 2, 3, 1)                
+            pred_img_feature = pred_img_feature.permute(0, 2, 3, 1)
+
+            # Chỉ lưu 5 ảnh từ batch
+            num_to_save = min(2, gt_img_feature.shape[0])
+
+            for i in range(num_to_save):
                 output_file = os.path.join(save_folder, f'landmarks/landmarks_{i}.png')
+
+                # Lấy từng channel của GT và Prediction
+                gt_channels = [gt_img_feature[i][:, :, ch].detach().cpu().numpy() for ch in range(4)]
+                pred_channels = [pred_img_feature[i][:, :, ch].detach().cpu().numpy() for ch in range(4)]
                 
-                gt_lm = gt_img_feature[i][:,:,:3]
-                pred_lm = img_feature[i][:,:,:3]
+                # Tạo subplots với 4 axes (tương ứng với 4 kênh)
+                fig, axes = plt.subplots(3, 4, figsize=(24, 12))
 
-                combined_image = np.ones((image_size, image_size * 2, 3), dtype=np.uint8) * 255
-                combined_image[:, :image_size, :] = gt_lm
-                combined_image[:, image_size:, :] = pred_lm
+                for ch in range(4):
+                    # Tính sự khác biệt giữa GT và Prediction cho từng kênh
+                    diff = abs(pred_channels[ch] - gt_channels[ch])
 
-                # Tạo subplots
-                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+                    # Normalize từng kênh để hiển thị heatmap trong khoảng [0, 1]
+                    # gt_channels[ch] = (gt_channels[ch] - gt_channels[ch].min()) / (gt_channels[ch].max() - gt_channels[ch].min() + 1e-5)
+                    # pred_channels[ch] = (pred_channels[ch] - pred_channels[ch].min()) / (pred_channels[ch].max() - pred_channels[ch].min() + 1e-5)
+                    # diff = (diff - diff.min()) / (diff.max() - diff.min() + 1e-5)
 
-                # Phần 1: Ảnh background + Ground Truth
-                axes[0].imshow(combined_image[:, :image_size, :])
-                axes[0].set_title('Ground Truth')
-                axes[0].axis('off')
+                    # Phần 1: GT (Heatmap của từng kênh)
+                    sns.heatmap(gt_channels[ch], ax=axes[0, ch], cbar=True)
+                    axes[0, ch].set_title(f'GT Channel {ch}')
+                    axes[0, ch].axis('off')
 
-                # Phần 2: Ảnh background + Prediction
-                axes[1].imshow(combined_image[:, image_size:image_size*2, :])
-                axes[1].set_title('Prediction')
-                axes[1].axis('off')
+                    # Phần 2: Prediction (Heatmap của từng kênh)
+                    sns.heatmap(pred_channels[ch], ax=axes[1, ch],  cbar=True)
+                    axes[1, ch].set_title(f'Pred Channel {ch}')
+                    axes[1, ch].axis('off')
+
+                    # Phần 3: Hiệu giữa Prediction và GT (Difference Heatmap)
+                    sns.heatmap(diff, ax=axes[2, ch], cbar=True)  # 'RdBu' sẽ làm rõ sự khác biệt
+                    axes[2, ch].set_title(f'Difference Channel {ch}')
+                    axes[2, ch].axis('off')
 
                 # Lưu ảnh vào file
                 plt.savefig(output_file, bbox_inches='tight')
                 plt.close()
+
+
+

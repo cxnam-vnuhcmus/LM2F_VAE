@@ -42,6 +42,7 @@ class CustomLoss(nn.Module):
         self.beta = beta
         self.gamma = gamma
         self.mse_loss = nn.MSELoss()
+        # self.bce_loss = nn.BCEWithLogitsLoss()
         self.kd_loss_fn = nn.KLDivLoss(reduction='batchmean')
 
     def forward(self, pred, target):
@@ -49,6 +50,7 @@ class CustomLoss(nn.Module):
         target = target.cpu()
         
         mse_loss = self.mse_loss(pred, target)
+        # bce_loss = self.bce_loss(pred, target)
         
         log_pred_features = torch.log_softmax(pred, dim=-1)
         log_target_features = torch.softmax(target, dim=-1)
