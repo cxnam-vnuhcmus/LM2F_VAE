@@ -178,18 +178,18 @@ class Dataset(td.Dataset):
             gt_img_features.append(gt_img_feature)
             
             #img_mask_feature
-            # with open(vs_mask_feat_path, "r") as f:
-            #     img_mask_feature = json.load(f)
-            # gt_img_mask_feature = torch.FloatTensor(img_mask_feature) #(1, 4, 32, 32)
-            # gt_img_mask_features.append(gt_img_mask_feature)
+            with open(vs_mask_feat_path, "r") as f:
+                img_mask_feature = json.load(f)
+            gt_img_mask_feature = torch.FloatTensor(img_mask_feature) #(1, 4, 32, 32)
+            gt_img_mask_features.append(gt_img_mask_feature)
             
             #gt_img
             vs_paths.append(vs_path)
             
-            gt_img = Image.open(vs_path)
-            gt_img = self.img_transform(gt_img)
-            gt_img = gt_img.unsqueeze(0)
-            gt_imgs.append(gt_img)
+            # gt_img = Image.open(vs_path)
+            # gt_img = self.img_transform(gt_img)
+            # gt_img = gt_img.unsqueeze(0)
+            # gt_imgs.append(gt_img)
             
             #audio
             # with open(audio_name, "r") as f:
@@ -200,11 +200,11 @@ class Dataset(td.Dataset):
             
         lm_features = torch.cat(lm_features, dim=0)
         gt_img_features = torch.cat(gt_img_features, dim=0)
-        # gt_img_mask_features = torch.cat(gt_img_mask_features, dim=0)
+        gt_img_mask_features = torch.cat(gt_img_mask_features, dim=0)
         # mfcc_features = torch.stack(mfcc_features, dim=0)
-        gt_imgs = torch.cat(gt_imgs, dim=0)
+        # gt_imgs = torch.cat(gt_imgs, dim=0)
         
-        return (lm_features, gt_img_features, gt_imgs, vs_paths, None)
+        return (lm_features, gt_img_features, gt_img_mask_features, vs_paths, None)
 
     def collate_fn(self, batch):
         batch_landmark, batch_gt_img_feature, batch_gt_mask_img_feature, batch_vs_path, batch_mfcc = zip(*batch)

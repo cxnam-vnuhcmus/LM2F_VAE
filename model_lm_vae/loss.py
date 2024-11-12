@@ -1,9 +1,12 @@
 from ignite.metrics import Metric
 import torch
 from torch import nn
-from scipy.stats import wasserstein_distance
+import torchvision.models as models
+import torchvision.transforms as transforms
 from .utils import FACEMESH_ROI_IDX, FACEMESH_LIPS_IDX, FACEMESH_FACES_IDX
 import numpy as np
+import mediapipe as mp
+import cv2
 
 mapped_lips_indices = [FACEMESH_ROI_IDX.index(i) for i in FACEMESH_LIPS_IDX]
 mapped_faces_indices = [FACEMESH_ROI_IDX.index(i) for i in FACEMESH_FACES_IDX]
@@ -97,3 +100,41 @@ class AdversarialLoss(nn.Module):
             labels = (self.real_label if is_real else self.fake_label).expand_as(outputs)
             loss = self.criterion(outputs, labels)
             return loss
+
+class VGG19FeatureExtractor(nn.Module):
+    def __init__(self, layers=None):
+        super(VGG19FeatureExtractor, self).__init__()
+        
+        # Load pretrained VGG19 model
+        vgg19 = models.vgg19(weights=models.VGG19_Weights.IMAGENET1K_V1).features
+        
+        # Only keep the specified layers for feature extraction
+        self.layers = nn.Sequential(*list(vgg19.children())[:layers])
+    
+    def forward(self, x):
+        return self.layers(x)
+
+# Define perceptual loss function using VGG19
+def perceptual_loss(generated, target, vgg19_model):
+    # Make sure both images are in the same format (B, C, H, W)
+    generated = generated.unsqueeze(0) if generated.dim() == 3 else generated
+    target = target.unsqueeze(0) if target.dim() == 3 else target
+    
+    # Normalize images to match ImageNet statistics
+    preprocess = transforms.Compose([
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    
+    generated = preprocess(generated)
+    target = preprocess(target)
+    
+    vgg19_model.eval()
+    
+    # Extract features from the VGG model
+    with torch.no_grad():
+        generated_features = vgg19_model(generated)
+        target_features = vgg19_model(target)
+    
+    # Compute L2 loss between features of the generated and target images
+    loss = nn.MSELoss()(generated_features, target_features)
+    return loss

@@ -9,13 +9,11 @@ import os
 from typing import Union
 import json
 import torchvision.transforms as transforms
-from .landmark_encoder_v4 import FusionModel
+from .landmark_encoder_v6 import FusionModel
 from .visual_encoder import VisualEncoder
-from .discriminator import Discriminator
-from .loss import AdversarialLoss
-from piq import ssim, psnr
+from .loss import VGG19FeatureExtractor, perceptual_loss
 
-#DS_V5 LM_V4
+#DS_V7 LM_V6
 class Model(nn.Module):
 
     def __init__(self,
@@ -27,84 +25,93 @@ class Model(nn.Module):
         self.pretrained = pretrained
         self.infer_samples = infer_samples
         
-        self.model = FusionModel()
+        self.model = FusionModel(n_frame=3)
         
         self.vsencoder = VisualEncoder()
+        for param in self.vsencoder.parameters():
+            param.requires_grad = False
+        for param in list(self.vsencoder.vae.parameters())[-2:]:
+            param.requires_grad = True
+        for param in list(self.vsencoder.vae.decoder.parameters())[-3:]: #108 midblock
+            param.requires_grad = True
+            
+        self.vgg19 = VGG19FeatureExtractor(layers=18)
+        for param in self.vgg19.parameters():
+            param.requires_grad = False
+            
+        # self.pred_landmark = nn.Sequential(
+        #     nn.Conv2d(4, 2, kernel_size=7, stride=1, padding=3),
+        #     nn.Flatten(start_dim=1),
+        #     nn.Linear(2 * 32 * 32, 1 * 32 * 32),
+        #     nn.ReLU(),
+        #     nn.Linear(1 * 32 * 32, 131 * 2),
+        #     nn.Sigmoid()
+        # )
+        
+        self.kd_loss_fn = nn.KLDivLoss(reduction='batchmean')
+        self.rec_loss_fn = nn.MSELoss()
                 
     @property
     def device(self):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         return device
     
-    def forward(self,
-                gt_lm_feature,
-                gt_img_feature,
-                gt_img
-                ):
-        gt_lm_feature = gt_lm_feature.to(self.device)
-        gt_img_feature = gt_img_feature.to(self.device)
-        gt_img = gt_img.to(self.device)
+    def forward(self,batch):
+        gt_lm_feature = batch["gt_lm_feature"].to(self.device)
+        gt_img_feature = batch["gt_img_feature"].to(self.device)
+        ref_lm_feature = batch["ref_lm_feature"].to(self.device)
+        ref_img_feature = batch["ref_img_feature"].to(self.device)
+        gt_mask_img_feature = batch["gt_mask_img_feature"].to(self.device)
+        gt_img = batch["gt_img"].to(self.device)
+        # gt_lm = batch["gt_lm"].to(self.device)
         
-        mask_gt_img_feature = gt_img_feature.clone()        
-        noise = torch.randn(gt_img_feature.shape).to(self.device)
-        mask_gt_img_feature[:, :, :, 4*4:7*4, 2*4:6*4] += noise[:, :, :, 4*4:7*4, 2*4:6*4]
-        
-        ref_img_feature = gt_img_feature.clone()
-        ref_lm_feature = gt_lm_feature.clone()
-        ref_idx = torch.randperm(ref_img_feature.size(0))
-        ref_img_feature = ref_img_feature[ref_idx]
-        ref_lm_feature = ref_img_feature[ref_idx]
-        
-        pred_img_feature =  self.model(mask_gt_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)        
-        
-        mse_loss = self.model.loss_function(pred_img_feature, gt_img_feature)
-        
+        pred_img_feature =  self.model(gt_mask_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)         
         latents = pred_img_feature.reshape(-1, 4, 32, 32)
-        pred_img = self.vsencoder.decode(latents)     
-        pred_img = pred_img.reshape(pred_img_feature.size(0), -1, 3, 256, 256)
-        pred_img = pred_img.reshape(-1, 3, 256, 256).to(torch.float32)
-        gt_img = gt_img.reshape(-1, 3, 256, 256).to(torch.float32)
-        ssim_loss = 1 - ssim(gt_img, pred_img, data_range=1.)
-        mse_img_loss = nn.MSELoss()(pred_img, gt_img)
-        # tv_loss = torch.sum(torch.abs(pred_img[:, :, :-1, :] - pred_img[:, :, 1:, :])) + torch.sum(torch.abs(pred_img[:, :, :, :-1] - pred_img[:, :, :, 1:]))
+        pred_img = self.vsencoder.decode(latents)
+        gt_img = gt_img.reshape(-1, 3, 256, 256)
         
-        loss = mse_loss + 0.2 * mse_img_loss + 0.2 * ssim_loss #+ 0.01 * tv_loss
+        # pred_lm = self.pred_landmark(latents)  #(B*N, 131*2)
+        # gt_lm = gt_lm.view(gt_lm.size(0) * gt_lm.size(1), -1)  #(B*N, 131*2)
+        
+        loss = self.loss_function(pred_img_feature, gt_img_feature, pred_img, gt_img, None, None)
         
         return pred_img_feature, loss
-            
-    def training_step_imp(self, batch, device) -> torch.Tensor:
-        gt_lm_feature, gt_img_feature, gt_mask_img_feature, _, audio_feature = batch
+    
+    def loss_function(self, pred_feature, gt_feature, pred_img, gt_img, pred_lm, gt_lm):
+        # pred_feature = pred_feature.reshape(-1, 4, 32, 32)
+        # gt_feature = gt_feature.reshape(-1, 4, 32, 32)
+        log_pred_feature = F.log_softmax(pred_feature, dim=2)
+        log_gt_feature = F.softmax(gt_feature, dim=2)
+        kd_loss = self.kd_loss_fn(log_pred_feature, log_gt_feature)
+        rec_loss = self.rec_loss_fn(pred_img, gt_img)
+        p_loss = perceptual_loss(pred_img, gt_img, self.vgg19)
+        # lm_loss = nn.MSELoss()(pred_lm, gt_lm)
         
-        _, loss = self(
-            gt_lm_feature = gt_lm_feature,
-            gt_img_feature = gt_img_feature,
-            gt_img = gt_mask_img_feature
-        )
+        loss = 0.0001 * kd_loss \
+        + 10.0 * rec_loss \
+        + 0.1 * p_loss \
+        # + 50.0 * lm_loss
+        
+        return loss
+    
+    def training_step_imp(self, batch, device) -> torch.Tensor:
+        _, loss = self(batch)
         
         return loss
 
     def eval_step_imp(self, batch, device):
+        gt_img_feature = batch["gt_img_feature"]
+        
         with torch.no_grad():
-            gt_lm_feature, gt_img_feature, gt_mask_img_feature, _, audio_feature = batch
-            
-            img_feature, _ = self(
-                gt_lm_feature = gt_lm_feature,
-                gt_img_feature = gt_img_feature,
-                gt_img = gt_mask_img_feature
-            )
+            pred_img_feature, _ = self(batch)
                             
-        return {"y_pred": img_feature, "y": gt_img_feature}
+        return {"y_pred": pred_img_feature, "y": gt_img_feature}
         
     def inference(self, batch, device, save_folder):
         with torch.no_grad():
-            gt_lm_feature, gt_img_feature, gt_mask_img_feature, batch_vs_path, audio_feature = batch
+            gt_img_feature = batch["gt_img_feature"]
             
-            # Forward pass with attention weights output
-            pred_img_feature, _ = self(
-                gt_lm_feature=gt_lm_feature,
-                gt_img_feature=gt_img_feature,
-                gt_img = gt_mask_img_feature
-            )
+            pred_img_feature, _ = self(batch)
             
             os.makedirs(os.path.join(save_folder, "landmarks"), exist_ok=True)
             
@@ -113,7 +120,7 @@ class Model(nn.Module):
             data = {
                 "gt_img_feature": gt_img_feature_list,
                 "pred_img_feature": pred_img_feature_list,
-                "gt_img_path": batch_vs_path
+                "gt_img_path": batch["vs_path"]
             }
             with open(os.path.join(save_folder, 'tensor_data.json'), 'w') as json_file:
                 json.dump(data, json_file)

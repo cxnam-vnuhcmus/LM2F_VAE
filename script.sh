@@ -3,10 +3,10 @@ python main.py \
   --config config/model-lm-vae.json \
   --data_root /home/cxnam/Documents/MEAD \
   --data_file ./assets/datas_norm/M003.txt \
-  --suffix M003_lm_vae_v43 \
-  --model model_lm_vae.model_v4_3.Model \
+  --suffix M003_lm_vae_v6 \
+  --model model_lm_vae.model_v6.Model \
   --dataset model_lm_vae.dataset_v7.Dataset \
-  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v43 \
+  --log_samples /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v6 \
   --skip-train-val \
   --epochs 300 \
   --pretrained /home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/checkpoints/checkpoint_M003_lm_vae_v4_checkpoint_50.pt \

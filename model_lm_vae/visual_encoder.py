@@ -17,8 +17,6 @@ class VisualEncoder(nn.Module):
         ]) 
         
         self.vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-ema")
-        for param in self.vae.parameters():
-            param.requires_grad = False
 
     def encode(self, x):
         trans_image = self.transform(x)
