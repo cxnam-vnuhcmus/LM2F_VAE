@@ -2,8 +2,8 @@
   "Setup": {
     "name": "Model_LM_VAE",
     "suffix": "CV1",
-    "batch_train": 8,
-    "batch_test": 8,
+    "batch_train": 32,
+    "batch_test": 32,
     "workers_train": 10,
     "workers_test": 10,
     "epochs": 20,

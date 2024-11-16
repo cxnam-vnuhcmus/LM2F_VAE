@@ -2,3 +2,5 @@ assets/**/*.pt
 assets/**/*.jpg
 assets/**/*.png
 assets/logs/*.txt
+**/*.pyc
+**/*.out
