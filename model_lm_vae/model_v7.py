@@ -9,10 +9,11 @@ import os
 from typing import Union
 import json
 import torchvision.transforms as transforms
-import seaborn as sns
 from .landmark_encoder_v7 import FusionModel
+from .visual_encoder import VisualEncoder
+from .loss import VGG19FeatureExtractor, perceptual_loss
 
-#DS_V6 LM_V7
+#DS_V8 LM_V7
 class Model(nn.Module):
 
     def __init__(self,
@@ -24,76 +25,102 @@ class Model(nn.Module):
         self.pretrained = pretrained
         self.infer_samples = infer_samples
         
-        self.model = FusionModel()
+        self.model = FusionModel(n_ref_frame=5)
         
+        self.vsencoder = VisualEncoder()
+        for param in self.vsencoder.parameters():
+            param.requires_grad = False
+        for param in list(self.vsencoder.vae.parameters())[-2:]:
+            param.requires_grad = True
+        for param in list(self.vsencoder.vae.decoder.parameters())[-3:]: #108 midblock
+            param.requires_grad = True
+            
+        self.vgg19 = VGG19FeatureExtractor(layers=18)
+        for param in self.vgg19.parameters():
+            param.requires_grad = False
+            
+        # self.pred_landmark = nn.Sequential(
+        #     nn.Conv2d(4, 2, kernel_size=7, stride=1, padding=3),
+        #     nn.Flatten(start_dim=1),
+        #     nn.Linear(2 * 32 * 32, 1 * 32 * 32),
+        #     nn.ReLU(),
+        #     nn.Linear(1 * 32 * 32, 131 * 2),
+        #     nn.Sigmoid()
+        # )
+        
+        self.kd_loss_fn = nn.KLDivLoss(reduction='batchmean')
+        self.rec_loss_fn = nn.MSELoss()
+        self.feat_loss_fn = nn.MSELoss()
+                
     @property
     def device(self):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         return device
     
-    def forward(self,
-                gt_lm_feature,
-                gt_img_feature,
-                audio_feature,
-                gt_mask_img_feature
-                ):
-        gt_lm_feature = gt_lm_feature.to(self.device)
-        gt_img_feature = gt_img_feature.to(self.device)
-        # audio_feature = audio_feature.to(self.device)
-        # gt_mask_img_feature = gt_mask_img_feature.to(self.device)
+    def forward(self,batch):
+        gt_lm_feature = batch["gt_lm_feature"].to(self.device)
+        # gt_img_feature = batch["gt_img_feature"].to(self.device)
+        ref_lm_feature = batch["ref_lm_feature"].to(self.device)
+        ref_img_feature = batch["ref_img_feature"].to(self.device)
+        gt_mask_img_feature = batch["gt_mask_img_feature"].to(self.device)
+        gt_img = batch["gt_img"].to(self.device)
+        # gt_lm = batch["gt_lm"].to(self.device)
+
+        norm = transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        gt_img_vae = gt_img.clone()
+        gt_img_vae = gt_img_vae[:, 0]
+        gt_img_feature = self.vsencoder.encode(norm(gt_img_vae))
+        gt_img_feature = gt_img_feature.unsqueeze(1)
         
-        mask_gt_img_feature = gt_img_feature.clone()        
-        noise = torch.randn(gt_img_feature.shape).to(self.device)
-        mask_gt_img_feature[:, :, 4*4:7*4, 2*4:6*4] += noise[:, :, 4*4:7*4, 2*4:6*4]
+        pred_img_feature =  self.model(gt_mask_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)         
+        latents = pred_img_feature.reshape(-1, 4, 32, 32)
+        pred_img = self.vsencoder.decode(latents)
+        gt_img = gt_img.reshape(-1, 3, 256, 256)
         
-        ref_img_feature = gt_img_feature.clone()
-        ref_lm_feature = gt_lm_feature.clone()
-        ref_idx = torch.randperm(ref_img_feature.size(0))
-        ref_img_feature = ref_img_feature[ref_idx]
-        ref_lm_feature = ref_img_feature[ref_idx]
+        # pred_lm = self.pred_landmark(latents)  #(B*N, 131*2)
+        # gt_lm = gt_lm.view(gt_lm.size(0) * gt_lm.size(1), -1)  #(B*N, 131*2)
         
-        pred_img_feature, attention_map =  self.model(mask_gt_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)        
+        loss = self.loss_function(pred_img_feature, gt_img_feature, pred_img, gt_img, None, None)
         
-        loss = self.model.loss_function(pred_img_feature, gt_img_feature)
+        return pred_img_feature, loss, pred_img, gt_img
+    
+    def loss_function(self, pred_feature, gt_feature, pred_img, gt_img, pred_lm, gt_lm):
+        # pred_feature = pred_feature.reshape(-1, 4, 32, 32)
+        # gt_feature = gt_feature.reshape(-1, 4, 32, 32)
+        # log_pred_feature = F.log_softmax(pred_feature, dim=2)
+        # log_gt_feature = F.softmax(gt_feature, dim=2)
+        # kd_loss = self.kd_loss_fn(log_pred_feature, log_gt_feature)
+        rec_loss = self.rec_loss_fn(pred_img, gt_img)
+        p_loss = perceptual_loss(pred_img, gt_img, self.vgg19)
+        # lm_loss = nn.MSELoss()(pred_lm, gt_lm)
+        feat_loss = self.feat_loss_fn(pred_feature, gt_feature)
         
-        return pred_img_feature, loss
+        loss = 10.0 * feat_loss \
+        # 0.0001 * kd_loss \
+        + 10.0 * rec_loss \
+        + 0.1 * p_loss \
+        # + 50.0 * lm_loss
         
-        
+        return loss
+    
     def training_step_imp(self, batch, device) -> torch.Tensor:
-        gt_lm_feature, gt_img_feature, gt_mask_img_feature, _, audio_feature = batch
-        _, loss = self(
-            gt_lm_feature = gt_lm_feature,
-            gt_img_feature = gt_img_feature,
-            audio_feature = audio_feature,
-            gt_mask_img_feature = gt_mask_img_feature
-        )
+        _, loss, _, _ = self(batch)
         
         return loss
 
     def eval_step_imp(self, batch, device):
+        gt_img_feature = batch["gt_img_feature"]
+        
         with torch.no_grad():
-            gt_lm_feature, gt_img_feature, gt_mask_img_feature, _, audio_feature = batch
-            
-            img_feature, _ = self(
-                gt_lm_feature = gt_lm_feature,
-                gt_img_feature = gt_img_feature,
-                audio_feature = audio_feature,
-                gt_mask_img_feature = gt_mask_img_feature
-            )
+            pred_img_feature, _, _, _ = self(batch)
                             
-        return {"y_pred": img_feature, "y": gt_img_feature}
+        return {"y_pred": pred_img_feature, "y": gt_img_feature}
         
     def inference(self, batch, device, save_folder):
         with torch.no_grad():
-            gt_lm_feature, gt_img_feature, gt_mask_img_feature, batch_vs_path, audio_feature = batch
+            gt_img_feature = batch["gt_img_feature"]
             
-            # Forward pass with attention weights output
-            pred_img_feature, _ = self(
-                gt_lm_feature=gt_lm_feature,
-                gt_img_feature=gt_img_feature,
-                audio_feature = audio_feature,
-                gt_mask_img_feature = gt_mask_img_feature
-            )
+            pred_img_feature, _, pred_img, gt_img = self(batch)
             
             os.makedirs(os.path.join(save_folder, "landmarks"), exist_ok=True)
             
@@ -102,13 +129,17 @@ class Model(nn.Module):
             data = {
                 "gt_img_feature": gt_img_feature_list,
                 "pred_img_feature": pred_img_feature_list,
-                "gt_img_path": batch_vs_path
+                "gt_img_path": batch["vs_path"]
             }
             with open(os.path.join(save_folder, 'tensor_data.json'), 'w') as json_file:
                 json.dump(data, json_file)
 
+            gt_img_feature = gt_img_feature[:,0]
+            pred_img_feature = pred_img_feature[:, 0]            
             gt_img_feature = gt_img_feature.permute(0, 2, 3, 1)                
             pred_img_feature = pred_img_feature.permute(0, 2, 3, 1)
+            pred_img = pred_img.permute(0, 2, 3, 1).detach().cpu().numpy()
+            gt_img = gt_img.permute(0, 2, 3, 1).detach().cpu().numpy()
 
             for i in range(gt_img_feature.shape[0]):
                 image_size = 32
@@ -122,7 +153,7 @@ class Model(nn.Module):
                 combined_image[:, image_size:image_size*2, :] = pred_lm
 
                 # Tạo subplots
-                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+                fig, axes = plt.subplots(1, 4, figsize=(12, 4))
 
                 # Phần 1: Ảnh background + Ground Truth
                 axes[0].imshow(combined_image[:, :image_size, :])
@@ -133,9 +164,15 @@ class Model(nn.Module):
                 axes[1].imshow(combined_image[:, image_size:image_size*2, :])
                 axes[1].set_title('Prediction')
                 axes[1].axis('off')
+
+                axes[2].imshow(gt_img[i])  # For color image, no cmap is needed
+                axes[2].set_title('Groudtruth Image')
+                axes[2].axis('off')
+
+                axes[3].imshow(pred_img[i])  # For color image, no cmap is needed
+                axes[3].set_title('Predicted Image')
+                axes[3].axis('off')
                 
                 # Lưu ảnh vào file
                 plt.savefig(output_file, bbox_inches='tight')
                 plt.close()
-
-

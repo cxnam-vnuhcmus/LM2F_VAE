@@ -19,11 +19,11 @@ class VisualEncoder(nn.Module):
         self.vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-ema")
 
     def encode(self, x):
-        trans_image = self.transform(x)
-        trans_image = trans_image.unsqueeze(0)
-        trans_image = trans_image.to(self.vae.device)
+        # trans_image = self.transform(x)
+        # trans_image = trans_image.unsqueeze(0)
+        # trans_image = trans_image.to(self.vae.device)
         with torch.no_grad():
-            latents = self.vae.encode(trans_image).latent_dist.sample()
+            latents = self.vae.encode(x).latent_dist.sample()
         return latents
     
     def decode(self, latents):
