@@ -1,71 +1,74 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-class ChannelWiseAttention(nn.Module):
-    def __init__(self, in_channels, hidden_dim):
-        super(ChannelWiseAttention, self).__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(in_channels, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, in_channels)
-        )
-        
-    def forward(self, x):
-        # X.shape: (B, C, H, W)
-        B, C, H, W = x.size()
-        
-        # Reshape for MLP
-        x_flat = x.view(B, C, -1)  # Shape: (B, C, H*W)
-        attention_scores = self.mlp(x_flat)  # Shape: (B, C, H*W)
-        
-        # Softmax to get attention weights
-        attention_weights = F.softmax(attention_scores, dim=-1)  # Shape: (B, C, H*W)
-        
-        # Apply attention weights to the input
-        x_attended = (x_flat * attention_weights).view(B, C, H, W)  # Shape: (B, C, H, W)
-        
-        return x_attended, attention_weights
+from torchvision import transforms
+from .blocks import SPADE, AdaIN, convert_flow_to_deformation, make_coordinate_grid, warping
 
 
 class FusionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, n_ref_frame=5):
         super(FusionModel, self).__init__()
-        self.channel_attention = ChannelWiseAttention(in_channels=32*32, hidden_dim=512)
+        self.n_ref_frame = n_ref_frame
+        self.spade_layer_1 = SPADE(8, 4*n_ref_frame, 32)
+        self.spade_layer_2 = SPADE(8, 4*n_ref_frame, 32)
+        self.spade_layer_3 = SPADE(8, 4*n_ref_frame, 32)
+        self.conv_4 = torch.nn.Conv2d(8, 2, kernel_size=7, stride=1, padding=3)
+        self.conv_5= nn.Sequential(torch.nn.Conv2d(8, 4, kernel_size=7, stride=1, padding=3),
+                                   torch.nn.ReLU(),
+                                   torch.nn.Conv2d(4, 1, kernel_size=7, stride=1, padding=3),
+                                   torch.nn.Sigmoid(),
+                                   )#predict weight
         
-        # Additional convolutional layers after attention
-        self.conv1 = nn.Conv2d(16, 32, kernel_size=3, padding=1)  # (B, 16, 32, 32) -> (B, 32, 32, 32)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)  # (B, 32, 32, 32) -> (B, 64, 32, 32)
-        self.conv3 = nn.Conv2d(64, 4, kernel_size=3, padding=1)   # (B, 64, 32, 32) -> (B, 4, 32, 32)
+        self.spade_layer_4 = SPADE(24, 8, 32)
+        # self.adain_layer_4 = AdaIN(20, 8)
+        self.spade_layer_5 = SPADE(24, 8, 32)
+        # self.adain_layer_5 = AdaIN(20, 8)
+        self.spade_layer_6 = SPADE(24, 4, 32)
         
-        self.relu = nn.ReLU()
-
-    def forward(self, pred_mask_img, pred_lm, ref_img, ref_lm):
-        # Concatenate the inputs
-        x = torch.cat((pred_mask_img, pred_lm, ref_img, ref_lm), dim=1)  # Shape: (B, 16, 32, 32)
+        self.leaky_relu = torch.nn.LeakyReLU()
+        self.conv_last = torch.nn.Conv2d(in_channels=24, out_channels=4, kernel_size=7, stride=1, padding=3, bias=False)
         
-        # Process through channel-wise attention
-        x_attended, attention_map = self.channel_attention(x)
+    def forward(self, mask_gt_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature): #(B,N,4,32,32)
+        B, N_img, C, H, W = mask_gt_img_feature.shape
+        N_lm = gt_lm_feature.size(1)
+        mask_gt_img_feature = mask_gt_img_feature.reshape(B, N_img*C, H, W) #(B,4,32,32)
+        gt_lm_feature = gt_lm_feature.reshape(B, N_lm*C, H, W) #(B,20,32,32)
+        target_input = torch.cat([mask_gt_img_feature, gt_lm_feature], dim=1) #(B,24,32,32)
+        ref_input = torch.cat([ref_img_feature, ref_lm_feature], dim=2) #(B,3,8,32,32)
         
-        # Apply further layers to generate pred_img
-        x_out = self.conv1(x_attended)  # Shape: (B, 32, 32, 32)
-        x_out = self.relu(x_out)
-
-        x_out = self.conv2(x_out)  # Shape: (B, 64, 32, 32)
-        x_out = self.relu(x_out)
-
-        x_out = self.conv3(x_out)  # Shape: (B, 4, 32, 32)
+        driving_sketch = gt_lm_feature
         
-        return x_out, attention_map
-
-    def loss_function(self, pred_img, gt_img):
-        # Calculate mean and std of the ground truth
-        mean_gt = torch.mean(gt_img, dim=(0, 2, 3), keepdim=True)  # Shape: (1, C, 1, 1)
-        std_gt = torch.std(gt_img, dim=(0, 2, 3), keepdim=True)   # Shape: (1, C, 1, 1)
-
-        # Normalize the output
-        normalized_output = pred_img * std_gt + mean_gt
+        wrapped_spade_sum, wrapped_ref_sum=0.,0.
+        softmax_denominator=0.
+        for ref_idx in range(ref_input.size(1)):
+            ref_input_by_idx = ref_input[:,ref_idx] #(B,8,32,32)
+            ref_img_feature_by_idx = ref_img_feature[:, ref_idx] #(B,4,32,32)
+            
+            spade_output_1 = self.spade_layer_1(ref_input_by_idx, driving_sketch)
+            spade_output_2 = self.spade_layer_2(spade_output_1, driving_sketch)
+            spade_output_3 = self.spade_layer_3(spade_output_2, driving_sketch)
+            
+            output_flow = self.conv_4(spade_output_3)
+            output_weight = self.conv_5(spade_output_3)
+            
+            deformation=convert_flow_to_deformation(output_flow)
+            wrapped_spade = warping(spade_output_3, deformation)  #(32,8,32,32)
+            wrapped_ref = warping(ref_img_feature_by_idx, deformation)  #(32,4,32,32)
+            
+            softmax_denominator += output_weight
+            wrapped_spade_sum += wrapped_spade * output_weight
+            wrapped_ref_sum += wrapped_ref * output_weight
+            
+        softmax_denominator += 0.00001
+        wrapped_spade_sum = wrapped_spade_sum/softmax_denominator
+        wrapped_ref_sum = wrapped_ref_sum / softmax_denominator
         
-        # Loss based on the normalized output
-        return F.mse_loss(normalized_output, gt_img)
-
+        target_input = target_input.reshape(B,-1,H,W)
+        x = self.spade_layer_4(target_input, wrapped_spade_sum)
+        x = self.spade_layer_5(x, wrapped_spade_sum)
+        x = self.spade_layer_6(x, wrapped_ref_sum)
+        
+        x = self.leaky_relu(x)
+        x = self.conv_last(x)
+        x = x.reshape(B,N_img,4,32,32)
+        return x

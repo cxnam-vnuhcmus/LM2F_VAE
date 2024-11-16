@@ -10,7 +10,7 @@ def device():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return device
 
-root_path = './assets/samples/M003/samples_lm_vae_v42'
+root_path = './assets/samples/M003/samples_lm_vae_v7'
 # Load the data from the JSON file
 with open(f'{root_path}/tensor_data.json', 'r') as json_file:
     data = json.load(json_file)
