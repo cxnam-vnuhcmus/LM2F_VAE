@@ -8,3 +8,5 @@ assets/logs/*.txt
 model_lm_vae/__pycache__/dataset_v7.cpython-38.pyc
 assets/**/*.json
 *.jpg
+**/*.pyc
+**/*.out
