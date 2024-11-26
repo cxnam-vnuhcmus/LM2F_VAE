@@ -2,3 +2,9 @@ assets/**/*.pt
 assets/**/*.jpg
 assets/**/*.png
 assets/logs/*.txt
+**/*.jpg
+**/*.png
+**/*.pyc
+model_lm_vae/__pycache__/dataset_v7.cpython-38.pyc
+assets/**/*.json
+*.jpg
