@@ -42,7 +42,7 @@ class Model(nn.Module):
         audio_feature = audio_feature.to(self.device)
         # gt_mask_img_feature = gt_mask_img_feature.to(self.device)
         
-        mask_gt_img_feature = gt_img_feature.clone()        
+        mask_gt_img_ feature = gt_img_feature.clone()        
         noise = torch.randn(gt_img_feature.shape).to(self.device)
         mask_gt_img_feature[:, :, :, 4*4:7*4, 2*4:6*4] += noise[:, :, :, 4*4:7*4, 2*4:6*4]
         
