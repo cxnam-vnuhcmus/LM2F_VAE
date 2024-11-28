@@ -107,11 +107,11 @@ class Model(nn.Module):
         pred_fake, _ = self.discriminator(gt_img_gan)
         loss_G_GAN = self.adversarial_loss(pred_fake, True, is_disc=False).mean()
         
-        loss_G = 5.0 * feat_loss \
+        loss_G = 1.0 * feat_loss \
         # 0.0001 * kd_loss \
-        + 5.0 * rec_loss \
-        + 4.0 * p_loss \
-        + 2.5 * loss_G_GAN
+        + 1.0 * rec_loss \
+        + 10.0 * p_loss \
+        + 1.0 * loss_G_GAN
         
         return loss_G, loss_D
     
