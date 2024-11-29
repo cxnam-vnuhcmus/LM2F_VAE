@@ -4,3 +4,4 @@ assets/**/*.png
 assets/logs/*.txt
 **/*.pyc
 **/*.out
+assets/**/*.json

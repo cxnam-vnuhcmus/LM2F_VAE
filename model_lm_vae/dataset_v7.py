@@ -97,7 +97,7 @@ class Dataset(td.Dataset):
             vs_mask_feat_folder = os.path.join(visual_mask_feat_p, line)
             vs_folder = os.path.join(visual_p, line)
             
-            n_frame = 3
+            n_frame = 5
             lm_paths = sorted(os.listdir(lm_feat_folder))
             for i in range(2, len(lm_paths)-10,n_frame):
                 sequence_path = []

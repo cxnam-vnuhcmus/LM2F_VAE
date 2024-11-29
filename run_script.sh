@@ -20,10 +20,10 @@ python main.py \
   --config config/model-lm-vae.json \
   --data_root /media/cxnam/MEAD \
   --data_file /media/cxnam/LM2F_VAE/assets/datas_norm/M003.txt \
-  --suffix M003_lm_vae_v42 \
-  --model model_lm_vae.model_v4_2.Model \
+  --suffix M003_lm_vae_v43 \
+  --model model_lm_vae.model_v4_3.Model \
   --dataset model_lm_vae.dataset_v7.Dataset \
-  --log_samples /media/cxnam/LM2F_VAE/assets/samples/M003/samples_lm_vae_v42 \
+  --log_samples /media/cxnam/LM2F_VAE/assets/samples/M003/samples_lm_vae_v43 \
   --skip-train-val \
   --epochs 300
 

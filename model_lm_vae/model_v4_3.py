@@ -31,22 +31,14 @@ class Model(nn.Module):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         return device
     
-    def forward(self,
-                gt_lm_feature,
-                gt_img_feature,
-                ref_lm_feature,
-                ref_img_feature
-                ):
-        gt_lm_feature = gt_lm_feature.to(self.device)
-        gt_img_feature = gt_img_feature.to(self.device)
-        ref_lm_feature = ref_lm_feature.to(self.device)
-        ref_img_feature = ref_img_feature.to(self.device)
-        
-        mask_gt_img_feature = gt_img_feature.clone()        
-        noise = torch.randn(gt_img_feature.shape).to(self.device)
-        mask_gt_img_feature[:, :, :, 4*4:7*4, 2*4:6*4] += noise[:, :, :, 4*4:7*4, 2*4:6*4]
-        
-        pred_img_feature =  self.model(mask_gt_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)        
+    def forward(self, batch):
+        gt_lm_feature = batch["gt_lm_feature"].to(self.device)
+        gt_img_feature = batch["gt_img_feature"].to(self.device)
+        ref_lm_feature = batch["ref_lm_feature"].to(self.device)
+        ref_img_feature = batch["ref_img_feature"].to(self.device)
+        gt_mask_img_feature = batch["gt_mask_img_feature"].to(self.device)
+                
+        pred_img_feature =  self.model(gt_mask_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature)        
         
         loss = self.model.loss_function(pred_img_feature, gt_img_feature)
         
@@ -54,41 +46,24 @@ class Model(nn.Module):
         
         
     def training_step_imp(self, batch, device) -> torch.Tensor:
-        gt_lm_feature, gt_img_feature, ref_lm_feature, ref_img_feature, vs_path = batch
-        
-        _, loss = self(
-            gt_lm_feature = gt_lm_feature,
-            gt_img_feature = gt_img_feature,
-            ref_lm_feature = ref_lm_feature,
-            ref_img_feature = ref_img_feature
-        )
+        _, loss = self(batch)
         
         return loss
 
     def eval_step_imp(self, batch, device):
-        with torch.no_grad():
-            gt_lm_feature, gt_img_feature, ref_lm_feature, ref_img_feature, vs_path = batch
+        gt_img_feature = batch["gt_img_feature"]
         
-            pred_img_feature, _ = self(
-                gt_lm_feature = gt_lm_feature,
-                gt_img_feature = gt_img_feature,
-                ref_lm_feature = ref_lm_feature,
-                ref_img_feature = ref_img_feature
-            )
+        with torch.no_grad():
+            pred_img_feature, _ = self(batch)
                             
         return {"y_pred": pred_img_feature, "y": gt_img_feature}
         
     def inference(self, batch, device, save_folder):
         with torch.no_grad():
-            gt_lm_feature, gt_img_feature, ref_lm_feature, ref_img_feature, vs_path = batch
+            gt_img_feature = batch["gt_img_feature"]
             
             # Forward pass with attention weights output
-            pred_img_feature, _ = self(
-                gt_lm_feature = gt_lm_feature,
-                gt_img_feature = gt_img_feature,
-                ref_lm_feature = ref_lm_feature,
-                ref_img_feature = ref_img_feature
-            )
+            pred_img_feature, _ = self(batch)
             
             os.makedirs(os.path.join(save_folder, "landmarks"), exist_ok=True)
             
@@ -97,7 +72,7 @@ class Model(nn.Module):
             data = {
                 "gt_img_feature": gt_img_feature_list,
                 "pred_img_feature": pred_img_feature_list,
-                "gt_img_path": vs_path
+                "gt_img_path": batch["vs_path"]
             }
             with open(os.path.join(save_folder, 'tensor_data.json'), 'w') as json_file:
                 json.dump(data, json_file)
@@ -134,6 +109,5 @@ class Model(nn.Module):
                 # Lưu ảnh vào file
                 plt.savefig(output_file, bbox_inches='tight')
                 plt.close()
-
 
 
