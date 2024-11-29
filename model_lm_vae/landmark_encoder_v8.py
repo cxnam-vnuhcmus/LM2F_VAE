@@ -1,125 +1,83 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import transforms
+from .blocks import SPADE, AdaIN, convert_flow_to_deformation, make_coordinate_grid, warping
 
-class DoubleConv(nn.Module):
-    """(Conv -> BatchNorm -> ReLU) * 2"""
-    def __init__(self, in_channels, out_channels):
-        super(DoubleConv, self).__init__()
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, x):
-        return self.double_conv(x)
-
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UNet, self).__init__()
-
-        self.down1 = DoubleConv(in_channels, 64)
-        self.down2 = DoubleConv(64, 128)
-        self.down3 = DoubleConv(128, 256)
-        self.down4 = DoubleConv(256, 512)
-        
-        self.up1 = DoubleConv(512 + 256, 256)
-        self.up2 = DoubleConv(256 + 128, 128)
-        self.up3 = DoubleConv(128 + 64, 64)
-        self.out_conv = nn.Conv2d(64, out_channels, kernel_size=1)
-
-        self.pool = nn.MaxPool2d(2)
-
-    def forward(self, x):
-        # Downsampling
-        d1 = self.down1(x)
-        d2 = self.down2(self.pool(d1))
-        d3 = self.down3(self.pool(d2))
-        d4 = self.down4(self.pool(d3))
-        
-        # Upsampling
-        u1 = F.interpolate(d4, scale_factor=2, mode='bilinear', align_corners=True)
-        u1 = torch.cat([u1, d3], dim=1)
-        u1 = self.up1(u1)
-
-        u2 = F.interpolate(u1, scale_factor=2, mode='bilinear', align_corners=True)
-        u2 = torch.cat([u2, d2], dim=1)
-        u2 = self.up2(u2)
-
-        u3 = F.interpolate(u2, scale_factor=2, mode='bilinear', align_corners=True)
-        u3 = torch.cat([u3, d1], dim=1)
-        u3 = self.up3(u3)
-
-        return self.out_conv(u3)
-
-class DiffusionModel(nn.Module):
-    def __init__(self, timesteps=1000):
-        super(DiffusionModel, self).__init__()
-        self.timesteps = timesteps
-        self.unet = UNet(in_channels=8, out_channels=4)
-
-    def forward_diffusion(self, x, t):
-        """Add noise to the input at timestep t."""
-        noise = torch.randn_like(x)
-        return x * (1 - t / self.timesteps) + noise * (t / self.timesteps)
-
-    def reverse_diffusion(self, x, t):
-        """Denoise the input using the U-Net."""
-        return self.unet(x)
-
-    def forward(self, x):
-        # Forward diffusion
-        t = torch.randint(0, self.timesteps, (x.size(0),)).to(x.device)
-        x_noisy = self.forward_diffusion(x, t)
-
-        # Reverse diffusion (denoising)
-        x_denoised = self.reverse_diffusion(x_noisy, t)
-
-        return x_denoised
-
-class LandmarkEncoder(nn.Module):
-    def __init__(self, input_size=478, output_size=4):
-        super(LandmarkEncoder, self).__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(input_size * 2, 1024),  # Increase the feature dimension
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 4096),  # Targeting 4 * 32 * 32 (i.e., 4096)
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, landmarks):
-        # Flatten landmarks input to shape (B, 478 * 2)
-        x = self.fc(landmarks.view(landmarks.size(0), -1))
-        
-        # Reshape output to (B, 4, 32, 32)
-        return x.view(landmarks.size(0), 4, 32, 32)
 
 class FusionModel(nn.Module):
-    def __init__(self):
+    def __init__(self, n_ref_frame=5):
         super(FusionModel, self).__init__()
-        self.diffusion_model = DiffusionModel()
-        self.landmark_encoder = LandmarkEncoder()
-        self.mse_loss = nn.MSELoss()
-
-    def forward(self, image, landmarks):
-        # Encode landmarks to a spatial tensor
-        landmark_features = self.landmark_encoder(landmarks)
+        self.n_ref_frame = n_ref_frame
+        self.spade_layer_1 = SPADE(8, 4*n_ref_frame, 32)
+        self.spade_layer_2 = SPADE(8, 4*n_ref_frame, 32)
+        self.spade_layer_3 = SPADE(8, 4*n_ref_frame, 32)
+        self.conv_4 = torch.nn.Conv2d(8, 2, kernel_size=7, stride=1, padding=3)
+        self.conv_5= nn.Sequential(torch.nn.Conv2d(8, 4, kernel_size=7, stride=1, padding=3),
+                                   torch.nn.ReLU(),
+                                   torch.nn.Conv2d(4, 1, kernel_size=7, stride=1, padding=3),
+                                   torch.nn.Sigmoid(),
+                                   )#predict weight
         
-        # Concatenate landmark features with image along the channel dimension
-        image_with_landmarks = torch.cat([image, landmark_features], dim=1)
+        self.spade_layer_4 = SPADE(24, 8, 32)
+        # self.adain_layer_4 = AdaIN(20, 8)
+        self.spade_layer_5 = SPADE(24, 8, 32)
+        # self.adain_layer_5 = AdaIN(20, 8)
+        self.spade_layer_6 = SPADE(24, 8, 32)
+        self.spade_layer_7 = SPADE(24, 4, 32)
         
-        # Apply diffusion model to inpaint mouth region
-        output = self.diffusion_model(image_with_landmarks)
-        return output
-
-    def loss_function(self, pred_image, gt_image):
-        # Mean Squared Error (MSE) Loss
-        mse_loss_value = self.mse_loss(pred_image, gt_image)
+        self.leaky_relu = torch.nn.LeakyReLU()
+        self.conv_last = torch.nn.Conv2d(in_channels=24, out_channels=4, kernel_size=7, stride=1, padding=3, bias=False)
         
-        # Combine losses (with a balancing factor)
-        total_loss = mse_loss_value 
-        return total_loss
+    def forward(self, mask_gt_img_feature, gt_lm_feature, ref_img_feature, ref_lm_feature): #(B,N,4,32,32)
+        B, N_img, C, H, W = mask_gt_img_feature.shape
+        N_lm = gt_lm_feature.size(1)
+        mask_gt_img_feature = mask_gt_img_feature.reshape(B, N_img*C, H, W) #(B,4,32,32)
+        gt_lm_feature = gt_lm_feature.reshape(B, N_lm*C, H, W) #(B,20,32,32)
+        target_input = torch.cat([mask_gt_img_feature, gt_lm_feature], dim=1) #(B,24,32,32)
+        ref_input = torch.cat([ref_img_feature, ref_lm_feature], dim=2) #(B,3,8,32,32)
+        
+        driving_sketch = gt_lm_feature
+        
+        wrapped_spade_1_sum, wrapped_spade_2_sum, wrapped_spade_3_sum = 0.,0.,0.
+        wrapped_ref_sum=0.
+        softmax_denominator=0.
+        for ref_idx in range(ref_input.size(1)):
+            ref_input_by_idx = ref_input[:,ref_idx] #(B,8,32,32)
+            ref_img_feature_by_idx = ref_img_feature[:, ref_idx] #(B,4,32,32)
+            
+            spade_output_1 = self.spade_layer_1(ref_input_by_idx, driving_sketch)
+            spade_output_2 = self.spade_layer_2(spade_output_1, driving_sketch)
+            spade_output_3 = self.spade_layer_3(spade_output_2, driving_sketch)
+            
+            output_flow = self.conv_4(spade_output_3)
+            output_weight = self.conv_5(spade_output_3)
+            
+            deformation=convert_flow_to_deformation(output_flow)
+            wrapped_spade_3 = warping(spade_output_3, deformation)  #(32,8,32,32)
+            wrapped_spade_2 = warping(spade_output_2, deformation)  #(32,8,32,32)
+            wrapped_spade_1 = warping(spade_output_1, deformation)  #(32,8,32,32)
+            wrapped_ref = warping(ref_img_feature_by_idx, deformation)  #(32,4,32,32)
+            
+            softmax_denominator += output_weight
+            wrapped_spade_1_sum += wrapped_spade_1 * output_weight
+            wrapped_spade_2_sum += wrapped_spade_2 * output_weight
+            wrapped_spade_3_sum += wrapped_spade_3 * output_weight
+            wrapped_ref_sum += wrapped_ref * output_weight
+            
+        softmax_denominator += 0.00001
+        wrapped_spade_1_sum = wrapped_spade_1_sum/softmax_denominator
+        wrapped_spade_2_sum = wrapped_spade_2_sum/softmax_denominator
+        wrapped_spade_3_sum = wrapped_spade_3_sum/softmax_denominator
+        wrapped_ref_sum = wrapped_ref_sum / softmax_denominator
+        
+        target_input = target_input.reshape(B,-1,H,W)
+        x = self.spade_layer_4(target_input, wrapped_spade_1_sum)
+        x = self.spade_layer_5(x, wrapped_spade_2_sum)
+        x = self.spade_layer_6(x, wrapped_spade_3_sum)
+        x = self.spade_layer_7(x, wrapped_ref_sum)
+        
+        x = self.leaky_relu(x)
+        x = self.conv_last(x)
+        x = x.reshape(B,N_img,4,32,32)
+        return x

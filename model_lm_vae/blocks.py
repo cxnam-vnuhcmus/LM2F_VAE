@@ -193,7 +193,6 @@ class SPADE(torch.nn.Module):
         input = self.conv_2(input)
         return input
 
-
 def convert_flow_to_deformation(flow):
     r"""convert flow fields to deformations.
     Args:
