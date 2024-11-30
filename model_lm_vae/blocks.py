@@ -245,3 +245,32 @@ def warping(source_image, deformation):
         deformation = torch.nn.functional.interpolate(deformation, size=(h, w), mode='bilinear')
         deformation = deformation.permute(0, 2, 3, 1)
     return torch.nn.functional.grid_sample(source_image, deformation)
+
+class AdaptiveMouthEnhancement(nn.Module):
+    def __init__(self, target_dim, ref_dim, num_heads=4):
+        super(AdaptiveMouthEnhancement, self).__init__()
+        self.ref_proj = nn.Linear(ref_dim, target_dim)  # Điều chỉnh ref_dim về target_dim
+        self.attention = nn.MultiheadAttention(embed_dim=target_dim, num_heads=num_heads)
+
+    def forward(self, target_latent, ref_latent):
+        B, C_t, H, W = target_latent.shape
+        _, C_r, _, _ = ref_latent.shape
+        mouth_mask = torch.zeros(B, 1, H, W).to(target_latent.device)
+        mouth_mask[:, :, 4*4:7*4, 2*4:6*4] = 1  # Vùng miệng trong latent space
+
+        # Reshape target and ref latent to (N, B, D)
+        target_latent = target_latent.view(B, C_t, -1).permute(2, 0, 1)  # (HW, B, C_t)
+        ref_latent = ref_latent.view(B, C_r, -1).permute(2, 0, 1)        # (HW, B, C_r)
+
+        # Project ref_latent to match target_latent dim
+        ref_latent = self.ref_proj(ref_latent)  # (HW, B, C_t)
+
+        # Apply multi-head attention
+        enhanced, _ = self.attention(target_latent, ref_latent, ref_latent)
+
+        # Reshape back to (B, C_t, H, W)
+        enhanced = enhanced.permute(1, 2, 0).view(B, C_t, H, W)
+
+        # Apply mouth region mask
+        enhanced = mouth_mask * enhanced + (1 - mouth_mask) * target_latent.permute(1, 2, 0).view(B, C_t, H, W)
+        return enhanced

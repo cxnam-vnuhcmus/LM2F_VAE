@@ -15,34 +15,26 @@ def device():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     return device
 
-root_path = './assets/samples/M003/samples_lm_vae_v8'
-# Load the data from the JSON file
-with open(f'{root_path}/tensor_data.json', 'r') as json_file:
-    data = json.load(json_file)
+output_path = '/home/cxnam/Documents/MyWorkingSpace/LM2F_VAE/assets/samples/M003/samples_lm_vae_v8'
+root_path = '/media/cxnam/NewVolume/MEAD/W015/image_features/front_happy_level_1/001'
 
-# Convert lists back to tensors
-gt_img_feature = torch.tensor(data["gt_img_feature"]).reshape(-1, 4, 32, 32)
-pred_img_feature = torch.tensor(data["pred_img_feature"]).reshape(-1, 4, 32, 32)
-# gt_img_path = data["gt_img_path"][0]
-gt_img_path = [batch[0] for batch in data["gt_img_path"]]
-
-# Print shapes to verify
-print("gt_img_feature shape:", gt_img_feature.shape)
-print("pred_img_feature shape:", pred_img_feature.shape)
+gt_img_feature = []
+for i in range(5):
+    filename = f"{root_path}/{(i * 5 + 1):05d}.json"
+    with open(filename, "r") as f:
+        data = json.load(f)
+        data = torch.tensor(data)
+    gt_img_feature.append(data)
+gt_img_feature = torch.cat(gt_img_feature, dim=0)
 
 from diffusers import AutoencoderKL
 
-pred_features = pred_img_feature.to(device())
+pred_features = gt_img_feature.clone().to(device())
 gt_features = gt_img_feature.to(device())
-
-inv_normalize = T.Compose([
-    # T.Normalize(mean=[-1.0, -1.0, -1.0], std=[1.0/0.5, 1.0/0.5, 1.0/0.5]),
-    T.ToPILImage()
-]) 
 
 with torch.no_grad():
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-ema").to(device())
-    os.makedirs(f'{root_path}/images', exist_ok=True)
+    os.makedirs(f'{output_path}/images', exist_ok=True)
     for i in tqdm(range(pred_features.shape[0])):
         pf = pred_features[i].unsqueeze(0)
         # mask = torch.zeros(pf.shape).to(device())
@@ -59,7 +51,7 @@ with torch.no_grad():
         pred_image = (output - min_value)/(max_value - min_value)         
         to_pil = T.ToPILImage()
         inv_image = to_pil(pred_image)
-        inv_image.save(f'{root_path}/images/pred_{i:05d}.jpg')
+        inv_image.save(f'{output_path}/images/pred_{i:05d}.jpg')
         
         gt = gt_features[i].unsqueeze(0)
         samples = vae.decode(gt)
@@ -69,9 +61,8 @@ with torch.no_grad():
         gt_image = (output - min_value)/(max_value - min_value)  
         to_pil = T.ToPILImage()
         inv_image = to_pil(gt_image)
-        inv_image.save(f'{root_path}/images/gt_{i:05d}.jpg')
+        inv_image.save(f'{output_path}/images/gt_{i:05d}.jpg')
         
-        print(pred_image.shape)
         psnr_mark = psnr(pred_image.cpu(), gt_image.cpu())
         ssim_mark = ssim(pred_image.cpu().unsqueeze(0), gt_image.cpu().unsqueeze(0))
         print(f"{i} - PSRN: {psnr_mark}; SSIM: {ssim_mark}")
